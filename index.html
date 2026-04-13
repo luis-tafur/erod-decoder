@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EROD Decoder - FMCSA ELD File Viewer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#242833;--border:#2e3345;
+  --text:#e4e6ed;--text2:#9ca3b8;--accent:#6366f1;--accent2:#818cf8;
+  --off-duty:#22c55e;--sleeper:#3b82f6;--driving:#ef4444;--on-duty:#f59e0b;
+  --cert:#a855f7;--malf:#f43f5e;--login:#06b6d4;--engine:#f97316;
+}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh}
+a{color:var(--accent2)}
+
+/* Drop Zone */
+#drop-zone{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:80vh;border:2px dashed var(--border);border-radius:16px;
+  margin:24px;padding:48px;transition:all .2s;cursor:pointer;
+}
+#drop-zone.dragover{border-color:var(--accent);background:rgba(99,102,241,.08)}
+#drop-zone h1{font-size:28px;margin-bottom:8px}
+#drop-zone p{color:var(--text2);margin-bottom:24px}
+#drop-zone .icon{font-size:64px;margin-bottom:16px;opacity:.5}
+#file-input{display:none}
+.btn{
+  background:var(--accent);color:#fff;border:none;padding:10px 24px;
+  border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;
+}
+.btn:hover{background:var(--accent2)}
+
+/* Main Content */
+#content{display:none;padding:16px 24px 48px}
+
+/* Header Card */
+.header-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:24px;margin-bottom:20px;
+}
+.header-card h2{font-size:20px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.header-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.header-field{display:flex;flex-direction:column;gap:2px}
+.header-field label{font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.header-field span{font-size:15px;font-weight:500}
+
+/* Toolbar */
+.toolbar{
+  display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap;
+}
+.toolbar .file-name{
+  background:var(--surface);padding:6px 14px;border-radius:8px;
+  font-size:13px;color:var(--text2);border:1px solid var(--border);
+}
+.toolbar .btn-small{
+  background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  padding:6px 14px;border-radius:8px;font-size:13px;cursor:pointer;
+}
+.toolbar .btn-small:hover{background:var(--border)}
+
+/* Tabs */
+.tabs{
+  display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap;
+  border-bottom:1px solid var(--border);padding-bottom:0;
+}
+.tab{
+  padding:10px 18px;border-radius:8px 8px 0 0;cursor:pointer;
+  font-size:14px;font-weight:500;color:var(--text2);background:transparent;
+  border:1px solid transparent;border-bottom:none;transition:all .15s;
+  display:flex;align-items:center;gap:6px;
+}
+.tab:hover{color:var(--text);background:var(--surface)}
+.tab.active{color:var(--text);background:var(--surface);border-color:var(--border)}
+.tab .badge{
+  background:var(--surface2);padding:1px 8px;border-radius:10px;
+  font-size:12px;color:var(--text2);
+}
+.tab.active .badge{background:var(--accent);color:#fff}
+.tab .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* Tab Panels */
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* Tables */
+.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{
+  background:var(--surface2);padding:10px 12px;text-align:left;
+  font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--text2);position:sticky;top:0;white-space:nowrap;
+}
+td{padding:8px 12px;border-top:1px solid var(--border);vertical-align:top}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* Status badges */
+.status-badge{
+  display:inline-block;padding:2px 10px;border-radius:6px;
+  font-size:12px;font-weight:600;white-space:nowrap;
+}
+.status-off-duty{background:rgba(34,197,94,.15);color:var(--off-duty)}
+.status-sleeper{background:rgba(59,130,246,.15);color:var(--sleeper)}
+.status-driving{background:rgba(239,68,68,.15);color:var(--driving)}
+.status-on-duty{background:rgba(245,158,11,.15);color:var(--on-duty)}
+.status-active{background:rgba(34,197,94,.15);color:#22c55e}
+.status-inactive{background:rgba(156,163,184,.15);color:var(--text2)}
+.status-certify{background:rgba(168,85,247,.15);color:var(--cert)}
+.status-recertify{background:rgba(6,182,212,.15);color:var(--login)}
+.origin-auto{color:var(--text2)}
+.origin-driver{color:var(--accent2)}
+.origin-carrier{color:var(--on-duty)}
+.origin-unid{color:var(--malf)}
+.annotation-text{font-style:italic;color:var(--accent2);font-size:12px;max-width:200px}
+.coord{font-family:'Cascadia Code',Consolas,monospace;font-size:12px;color:var(--text2)}
+
+/* Certification highlight */
+.cert-day{
+  font-weight:700;font-size:15px;color:var(--cert);
+  background:rgba(168,85,247,.1);padding:4px 10px;border-radius:6px;
+}
+
+/* Timeline */
+.timeline-section{margin-bottom:24px}
+.timeline-day{
+  display:flex;align-items:center;gap:12px;margin-bottom:6px;
+}
+.timeline-label{width:90px;font-size:13px;color:var(--text2);text-align:right;flex-shrink:0}
+.timeline-bar{
+  flex:1;height:28px;background:var(--surface2);border-radius:6px;
+  position:relative;overflow:hidden;
+}
+.timeline-segment{
+  position:absolute;top:0;height:100%;min-width:1px;
+}
+.timeline-bar .tooltip{
+  display:none;position:absolute;bottom:110%;left:50%;transform:translateX(-50%);
+  background:#000;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;
+  white-space:nowrap;z-index:10;
+}
+.timeline-segment:hover .tooltip{display:block}
+
+/* Malfunction colors */
+.malf-malfunction{color:var(--malf);font-weight:600}
+.malf-diagnostic{color:var(--on-duty);font-weight:600}
+
+/* Summary cards */
+.summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.summary-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:16px;text-align:center;
+}
+.summary-card .num{font-size:28px;font-weight:700}
+.summary-card .lbl{font-size:12px;color:var(--text2);margin-top:4px}
+
+/* Empty state */
+.empty{padding:32px;text-align:center;color:var(--text2);font-size:14px}
+</style>
+</head>
+<body>
+
+<div id="drop-zone">
+  <div class="icon">&#128196;</div>
+  <h1>EROD Decoder</h1>
+  <p>Arrastra un archivo EROD de FMCSA aqui o haz clic para seleccionarlo</p>
+  <button class="btn" onclick="document.getElementById('file-input').click()">Seleccionar archivo</button>
+  <input type="file" id="file-input">
+</div>
+
+<div id="content">
+  <div class="toolbar">
+    <span class="file-name" id="file-name-display"></span>
+    <button class="btn-small" onclick="location.reload()">Cargar otro archivo</button>
+  </div>
+
+  <div class="header-card" id="header-card"></div>
+
+  <div class="summary-row" id="summary-row"></div>
+
+  <div class="tabs" id="tabs"></div>
+  <div id="tab-panels"></div>
+</div>
+
+<script>
+// ========== CONSTANTS ==========
+const EVENT_TYPES = {1:'Duty Status Change',2:'Intermediate Log',3:'Driver Indication Change'};
+const DUTY_CODES = {1:'Off Duty',2:'Sleeper Berth',3:'Driving',4:'On Duty (Not Driving)'};
+const DUTY_CSS = {1:'off-duty',2:'sleeper',3:'driving',4:'on-duty'};
+const DUTY_COLORS = {1:'var(--off-duty)',2:'var(--sleeper)',3:'var(--driving)',4:'var(--on-duty)'};
+const RECORD_STATUS = {1:'Active',2:'Inactive-Changed',3:'Inactive-Change Req',4:'Inactive-Change Rej'};
+const RECORD_ORIGIN = {1:'Auto (ELD)',2:'Driver',3:'Motor Carrier',4:'Unidentified'};
+const ORIGIN_CSS = {1:'origin-auto',2:'origin-driver',3:'origin-carrier',4:'origin-unid'};
+const CERT_ACTIONS = {1:'Certify',2:'Recertify'};
+const MALF_EVENT_TYPES = {3:'Data Diagnostic',4:'Malfunction'};
+const MALF_CODES_DIAG = {1:'Power Data Diagnostic',2:'Engine Sync Data Diagnostic',3:'Missing Data Diagnostic',4:'Data Transfer Data Diagnostic',5:'Unidentified Driving Records',6:'Other'};
+const MALF_CODES_MALF = {1:'Power Compliance Malfunction',2:'Engine Sync Compliance Malfunction',3:'Timing Compliance Malfunction',4:'Positioning Compliance Malfunction',5:'Data Recording Compliance Malfunction',6:'Data Transfer Compliance Malfunction',7:'Other'};
+const ENGINE_TYPES = {1:'Power Up (Shut Down)',3:'Power Up (normal)'};
+const LOGIN_TYPES = {1:'Login',2:'Logout'};
+
+// ========== HELPERS ==========
+function fmtDate(d){
+  if(!d||d.length!==6) return d||'';
+  return d.slice(0,2)+'/'+d.slice(2,4)+'/20'+d.slice(4,6);
+}
+function fmtTime(t){
+  if(!t||t.length!==6) return t||'';
+  return t.slice(0,2)+':'+t.slice(2,4)+':'+t.slice(4,6);
+}
+function fmtCoord(v){
+  if(!v||v==='X') return '-';
+  return parseFloat(v).toFixed(2);
+}
+function timeToMinutes(t){
+  if(!t||t.length!==6) return 0;
+  return parseInt(t.slice(0,2))*60+parseInt(t.slice(2,4));
+}
+
+// ========== PARSER ==========
+function parseEROD(rawText){
+  // Normalize line endings - records are separated by \r\n or \r
+  const text = rawText.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const data = {header:{},users:[],cmvs:[],events:[],annotations:{},certifications:[],malfunctions:[],logins:[],engines:[],unidentified:[],checksum:''};
+
+  // Split by segment labels
+  const segLabels = [
+    'ELD File Header Segment:',
+    'User List:',
+    'CMV List:',
+    'ELD Event List:',
+    'ELD Event Annotations or Comments:',
+    "Driver's Certification/Recertification Actions:",
+    'Malfunctions and Data Diagnostic Events:',
+    'ELD Login/Logout Report:',
+    'CMV Engine Power-Up and Shut Down Activity:',
+    'Unidentified Driver Profile Records:',
+    'End of File:'
+  ];
+
+  const segments = {};
+  let remaining = text;
+
+  for(let i=0;i<segLabels.length;i++){
+    const label = segLabels[i];
+    const nextLabel = segLabels[i+1];
+    const startIdx = remaining.indexOf(label);
+    if(startIdx===-1) continue;
+    const contentStart = startIdx + label.length;
+    let contentEnd;
+    if(nextLabel){
+      contentEnd = remaining.indexOf(nextLabel, contentStart);
+      if(contentEnd===-1) contentEnd = remaining.length;
+    } else {
+      contentEnd = remaining.length;
+    }
+    segments[label] = remaining.slice(contentStart, contentEnd).trim();
+  }
+
+  // Parse Header - multi-line format, each line ends with a 2-hex LineDataCheck
+  // Strip the check from each line, then join all fields into one flat array
+  const hdrRaw = segments['ELD File Header Segment:'];
+  if(hdrRaw){
+    const hdrLines = hdrRaw.split('\n').filter(l=>l.trim());
+    const allFields = [];
+    for(const line of hdrLines){
+      const parts = line.split(',');
+      // Last value on each line is the 2-hex line data check - remove it
+      if(parts.length>1) parts.pop();
+      allFields.push(...parts);
+    }
+    const h = allFields;
+    // Field map after stripping per-line checksums:
+    // [0]lastName [1]firstName [2]eldId [3]dlState [4]dlNumber
+    // [5-7]exempt/tp (may have extra empty) [8]DOT [9]VIN [10]truckNumber
+    // [11]trailer [12]carrier [13]multiDay [14]startHour [15]tzOffset
+    // [16]shippingId [17]recordCount [18]eldRegistration [19]outputFileDate
+    // [20-21]codriver(X=none) [22]codriverFlag [23]codriverHours
+    // [24]eldProvider [25]eldFirmware [26]certificate
+    data.header = {
+      lastName: h[0]||'', firstName: h[1]||'', eldId: h[2]||'',
+      dlState: h[3]||'', dlNumber: h[4]||'',
+      dotNumber: h[8]||'', vin: h[9]||'', truckNumber: h[10]||'',
+      trailerNumber: h[11]||'', carrierName: h[12]||'',
+      multiDay: h[13]||'', startHour: h[14]||'',
+      timeZoneOffset: h[15]||'',
+      shippingId: h[16]||'', recordCount: h[17]||'',
+      eldRegistration: h[18]||'',
+      outputFileDate: h[19]||'',
+      codriverLast: h[20]||'', codriverFirst: h[21]||'',
+      codriverAccumHours: h[23]||'',
+      codriverFlag: (h[20]&&h[20]!=='X')?'1':'0',
+      eldProvider: h[24]||'', eldFirmware: h[25]||'',
+      certificate: h[26]||''
+    };
+  }
+
+  // Parse User List - each line after count: userId,accountType,lastName,firstName
+  const uRaw = segments['User List:'];
+  if(uRaw){
+    const lines = uRaw.split('\n').filter(l=>l.trim());
+    // First line may just be the count, or count + first user on same line
+    // Parse all comma-separated as groups of 4 (skip leading count if numeric only)
+    const allParts = uRaw.replace(/\n/g,',').split(',').filter(p=>p.trim());
+    let idx = 0;
+    // Skip count if first value is just a number
+    if(allParts.length>0 && /^\d+$/.test(allParts[0].trim())) idx=1;
+    while(idx+3<allParts.length){
+      data.users.push({
+        userId: allParts[idx].trim(), role: allParts[idx+1].trim(),
+        lastName: allParts[idx+2].trim(), firstName: allParts[idx+3].trim(),
+        eldId: (allParts[idx+4]&&!/^\d+$/.test(allParts[idx+4].trim()))?allParts[idx+4].trim():''
+      });
+      idx+=4;
+      // If next value looks like an ELD ID (2-digit code), include it and skip
+      if(idx<allParts.length && /^[0-9A-Fa-f]{2,4}$/.test(allParts[idx-1+4]?.trim()||'')){
+        // already handled
+      }
+    }
+  }
+
+  // Parse CMV List - count, then per CMV: dotNumber,vin
+  const cRaw = segments['CMV List:'];
+  if(cRaw){
+    const allParts = cRaw.replace(/\n/g,',').split(',').filter(p=>p.trim());
+    let idx = 0;
+    if(allParts.length>0 && /^\d+$/.test(allParts[0].trim())) idx=1;
+    while(idx+1<allParts.length){
+      data.cmvs.push({
+        dotNumber: allParts[idx].trim(), vin: allParts[idx+1].trim(),
+        eventCount: allParts[idx+2]?.trim()||''
+      });
+      idx+=3;
+    }
+  }
+
+  // Parse ELD Events - FMCSA field order per Appendix A section 4.5.1:
+  // SeqID, RecordStatus, RecordOrigin, EventType, EventCode, Date, Time,
+  // AccumMiles, AccumHours, Lat, Lon, Dist, CMVOrder, UserOrder,
+  // MalfIndicator, DataDiagIndicator, EventDataCheck, LineDataCheck
+  const eRaw = segments['ELD Event List:'];
+  if(eRaw){
+    const lines = eRaw.split('\n').filter(l=>l.trim());
+    for(const line of lines){
+      const p = line.split(',');
+      if(p.length<16) continue;
+      data.events.push({
+        seqId: p[0].trim(),
+        recordStatus: parseInt(p[1]),
+        recordOrigin: parseInt(p[2]),
+        eventType: parseInt(p[3]),
+        eventCode: parseInt(p[4]),
+        date: p[5], time: p[6],
+        accumMiles: p[7], accumHours: p[8],
+        lat: p[9], lon: p[10],
+        distSinceValid: p[11],
+        cmvOrder: p[12]||'', userOrder: p[13]||'',
+        malfIndicator: p[14]||'', dataDiagIndicator: p[15]||'',
+        eventDataCheck: p[16]||'', lineDataCheck: p[17]||''
+      });
+    }
+  }
+
+  // Parse Annotations - each line: seqId,userId,comment,date,time,extra,check
+  const aRaw = segments['ELD Event Annotations or Comments:'];
+  if(aRaw){
+    const lines = aRaw.split('\n').filter(l=>l.trim());
+    for(const line of lines){
+      const p = line.split(',');
+      if(p.length<5) continue;
+      const seqId = p[0].trim();
+      data.annotations[seqId] = {userId:p[1],comment:p[2],date:p[3],time:p[4]};
+    }
+  }
+
+  // Parse Certifications - each line: seqId,actionType,date,time,certifiedDate,actionCode,check
+  const certRaw = segments["Driver's Certification/Recertification Actions:"];
+  if(certRaw){
+    const lines = certRaw.split('\n').filter(l=>l.trim());
+    for(const line of lines){
+      const p = line.split(',');
+      if(p.length<6) continue;
+      data.certifications.push({
+        seqId: p[0].trim(),
+        actionType: parseInt(p[1]),
+        date: p[2], time: p[3],
+        certifiedDate: p[4],
+        actionCode: p[5],
+        lineDataCheck: p[6]||''
+      });
+    }
+  }
+
+  // Parse Malfunctions - each line: seqId,eventType,eventCode,date,time,miles,hours,origin,check
+  const mRaw = segments['Malfunctions and Data Diagnostic Events:'];
+  if(mRaw){
+    const lines = mRaw.split('\n').filter(l=>l.trim());
+    for(const line of lines){
+      const p = line.split(',');
+      if(p.length<8) continue;
+      data.malfunctions.push({
+        seqId: p[0].trim(),
+        eventType: parseInt(p[1]),
+        eventCode: parseInt(p[2]),
+        date: p[3], time: p[4],
+        accumMiles: p[5], accumHours: p[6],
+        recordOrigin: parseInt(p[7]),
+        lineDataCheck: p[8]||''
+      });
+    }
+  }
+
+  // Parse Login/Logout - each line: seqId,eventCode,userId,date,time,miles,hours,check
+  const lRaw = segments['ELD Login/Logout Report:'];
+  if(lRaw){
+    const lines = lRaw.split('\n').filter(l=>l.trim());
+    for(const line of lines){
+      const p = line.split(',');
+      if(p.length<7) continue;
+      data.logins.push({
+        seqId: p[0].trim(),
+        eventCode: parseInt(p[1]),
+        userId: p[2],
+        date: p[3], time: p[4],
+        accumMiles: p[5], accumHours: p[6],
+        lineDataCheck: p[7]||''
+      });
+    }
+  }
+
+  // Parse Engine Activity - each line: seqId,eventCode,date,time,miles,hours,lat,lon,dot,vin,truck,shipping,check
+  const engRaw = segments['CMV Engine Power-Up and Shut Down Activity:'];
+  if(engRaw){
+    const lines = engRaw.split('\n').filter(l=>l.trim());
+    for(const line of lines){
+      const p = line.split(',');
+      if(p.length<12) continue;
+      data.engines.push({
+        seqId: p[0].trim(),
+        eventCode: parseInt(p[1]),
+        date: p[2], time: p[3],
+        accumMiles: p[4], accumHours: p[5],
+        lat: p[6], lon: p[7],
+        dotNumber: p[8], vin: p[9],
+        truckNumber: p[10], shippingId: p[11],
+        lineDataCheck: p[12]||''
+      });
+    }
+  }
+
+  // Parse Unidentified
+  const uiRaw = segments['Unidentified Driver Profile Records:'];
+  if(uiRaw && uiRaw.length > 0){
+    // Similar structure to events if present
+    data.unidentified = uiRaw;
+  }
+
+  // Checksum
+  const efRaw = segments['End of File:'];
+  if(efRaw) data.checksum = efRaw.trim();
+
+  return data;
+}
+
+// ========== RENDERERS ==========
+function renderHeader(h){
+  const card = document.getElementById('header-card');
+  card.innerHTML = `
+    <h2>&#128100; ${h.firstName} ${h.lastName}</h2>
+    <div class="header-grid">
+      <div class="header-field"><label>Carrier</label><span>${h.carrierName}</span></div>
+      <div class="header-field"><label>USDOT</label><span>${h.dotNumber}</span></div>
+      <div class="header-field"><label>VIN</label><span>${h.vin}</span></div>
+      <div class="header-field"><label>Truck #</label><span>${h.truckNumber}</span></div>
+      <div class="header-field"><label>Trailer #</label><span>${h.trailerNumber||'N/A'}</span></div>
+      <div class="header-field"><label>DL State</label><span>${h.dlState}</span></div>
+      <div class="header-field"><label>DL Number</label><span>${h.dlNumber}</span></div>
+      <div class="header-field"><label>ELD Provider</label><span>${h.eldProvider}</span></div>
+      <div class="header-field"><label>ELD Firmware</label><span>${h.eldFirmware}</span></div>
+      <div class="header-field"><label>ELD Registration</label><span>${h.eldRegistration}</span></div>
+      <div class="header-field"><label>Multi-Day Basis</label><span>${h.multiDay}-day</span></div>
+      <div class="header-field"><label>TZ Offset</label><span>${h.timeZoneOffset}</span></div>
+      <div class="header-field"><label>Shipping ID</label><span>${h.shippingId}</span></div>
+      <div class="header-field"><label>Co-Driver</label><span>${h.codriverFlag==='0'?'No':'Yes'}</span></div>
+    </div>
+  `;
+}
+
+function renderSummary(data){
+  const activeEvents = data.events.filter(e=>e.recordStatus===1);
+  const driving = activeEvents.filter(e=>e.eventType===1&&e.eventCode===3).length;
+  const onDuty = activeEvents.filter(e=>e.eventType===1&&e.eventCode===4).length;
+  const offDuty = activeEvents.filter(e=>e.eventType===1&&e.eventCode===1).length;
+  const sleeper = activeEvents.filter(e=>e.eventType===1&&e.eventCode===2).length;
+
+  document.getElementById('summary-row').innerHTML = `
+    <div class="summary-card"><div class="num" style="color:var(--text)">${data.events.length}</div><div class="lbl">Total Events</div></div>
+    <div class="summary-card"><div class="num" style="color:var(--driving)">${driving}</div><div class="lbl">Driving</div></div>
+    <div class="summary-card"><div class="num" style="color:var(--on-duty)">${onDuty}</div><div class="lbl">On Duty</div></div>
+    <div class="summary-card"><div class="num" style="color:var(--off-duty)">${offDuty}</div><div class="lbl">Off Duty</div></div>
+    <div class="summary-card"><div class="num" style="color:var(--sleeper)">${sleeper}</div><div class="lbl">Sleeper</div></div>
+    <div class="summary-card"><div class="num" style="color:var(--cert)">${data.certifications.length}</div><div class="lbl">Certifications</div></div>
+    <div class="summary-card"><div class="num" style="color:var(--malf)">${data.malfunctions.length}</div><div class="lbl">Malf/Diag</div></div>
+  `;
+}
+
+function renderCertifications(certs){
+  if(!certs.length) return '<div class="empty">No certification records found</div>';
+  let rows = certs.map(c=>{
+    const actionLabel = CERT_ACTIONS[c.actionType]||c.actionType;
+    const actionCss = c.actionType===1?'status-certify':'status-recertify';
+    return `<tr>
+      <td>${c.seqId}</td>
+      <td><span class="status-badge ${actionCss}">${actionLabel}</span></td>
+      <td>${fmtDate(c.date)}</td>
+      <td>${fmtTime(c.time)}</td>
+      <td><span class="cert-day">${fmtDate(c.certifiedDate)}</span></td>
+      <td>${c.actionCode}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Seq ID</th><th>Action</th><th>Action Date</th><th>Action Time</th><th>Day Certified</th><th>Code</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderEvents(events, annotations){
+  if(!events.length) return '<div class="empty">No events found</div>';
+  let rows = events.map(e=>{
+    const typeLabel = EVENT_TYPES[e.eventType]||e.eventType;
+    let codeLabel = e.eventCode;
+    let codeCss = '';
+    if(e.eventType===1){
+      codeLabel = DUTY_CODES[e.eventCode]||e.eventCode;
+      codeCss = 'status-'+( DUTY_CSS[e.eventCode]||'');
+    }
+    const statusLabel = RECORD_STATUS[e.recordStatus]||e.recordStatus;
+    const statusCss = e.recordStatus===1?'status-active':'status-inactive';
+    const originLabel = RECORD_ORIGIN[e.recordOrigin]||e.recordOrigin;
+    const originCss = ORIGIN_CSS[e.recordOrigin]||'';
+    const ann = annotations[e.seqId];
+    const annHtml = ann?`<span class="annotation-text">${ann.comment}</span>`:'';
+
+    return `<tr>
+      <td>${e.seqId}</td>
+      <td>${typeLabel}</td>
+      <td>${codeCss?`<span class="status-badge ${codeCss}">${codeLabel}</span>`:codeLabel}</td>
+      <td><span class="status-badge ${statusCss}">${statusLabel}</span></td>
+      <td><span class="${originCss}">${originLabel}</span></td>
+      <td>${fmtDate(e.date)}</td>
+      <td>${fmtTime(e.time)}</td>
+      <td>${e.accumMiles}</td>
+      <td>${e.accumHours}</td>
+      <td class="coord">${fmtCoord(e.lat)}, ${fmtCoord(e.lon)}</td>
+      <td>${annHtml}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Seq</th><th>Type</th><th>Code/Status</th><th>Record</th><th>Origin</th><th>Date</th><th>Time</th><th>Miles</th><th>Hours</th><th>Location</th><th>Annotation</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderAnnotations(annotations){
+  const keys = Object.keys(annotations);
+  if(!keys.length) return '<div class="empty">No annotations found</div>';
+  let rows = keys.map(k=>{
+    const a = annotations[k];
+    return `<tr><td>${k}</td><td>${a.userId}</td><td>${a.comment}</td><td>${fmtDate(a.date)}</td><td>${fmtTime(a.time)}</td></tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Event Seq</th><th>User ID</th><th>Comment</th><th>Date</th><th>Time</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderMalfunctions(malfs){
+  if(!malfs.length) return '<div class="empty">No malfunction/diagnostic events found</div>';
+  let rows = malfs.map(m=>{
+    const typeLabel = MALF_EVENT_TYPES[m.eventType]||m.eventType;
+    const typeCss = m.eventType===4?'malf-malfunction':'malf-diagnostic';
+    let codeLabel = m.eventCode;
+    if(m.eventType===3) codeLabel = MALF_CODES_DIAG[m.eventCode]||m.eventCode;
+    if(m.eventType===4) codeLabel = MALF_CODES_MALF[m.eventCode]||m.eventCode;
+    const originLabel = RECORD_ORIGIN[m.recordOrigin]||m.recordOrigin;
+    return `<tr>
+      <td>${m.seqId}</td>
+      <td><span class="${typeCss}">${typeLabel}</span></td>
+      <td>${codeLabel}</td>
+      <td>${fmtDate(m.date)}</td>
+      <td>${fmtTime(m.time)}</td>
+      <td>${m.accumMiles}</td>
+      <td>${m.accumHours}</td>
+      <td>${originLabel}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Seq</th><th>Type</th><th>Code</th><th>Date</th><th>Time</th><th>Miles</th><th>Hours</th><th>Origin</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderLogins(logins){
+  if(!logins.length) return '<div class="empty">No login/logout events found</div>';
+  let rows = logins.map(l=>{
+    const label = LOGIN_TYPES[l.eventCode]||l.eventCode;
+    const css = l.eventCode===1?'status-active':'status-inactive';
+    return `<tr>
+      <td>${l.seqId}</td>
+      <td><span class="status-badge ${css}">${label}</span></td>
+      <td>${l.userId}</td>
+      <td>${fmtDate(l.date)}</td>
+      <td>${fmtTime(l.time)}</td>
+      <td>${l.accumMiles}</td>
+      <td>${l.accumHours}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Seq</th><th>Action</th><th>User ID</th><th>Date</th><th>Time</th><th>Miles</th><th>Hours</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderEngines(engines){
+  if(!engines.length) return '<div class="empty">No engine activity found</div>';
+  let rows = engines.map(e=>{
+    const label = ENGINE_TYPES[e.eventCode]||('Code '+e.eventCode);
+    const css = e.eventCode===3?'status-active':'status-inactive';
+    return `<tr>
+      <td>${e.seqId}</td>
+      <td><span class="status-badge ${css}">${label}</span></td>
+      <td>${fmtDate(e.date)}</td>
+      <td>${fmtTime(e.time)}</td>
+      <td>${e.accumMiles}</td>
+      <td>${e.accumHours}</td>
+      <td class="coord">${fmtCoord(e.lat)}, ${fmtCoord(e.lon)}</td>
+      <td>${e.vin}</td>
+      <td>${e.truckNumber}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Seq</th><th>Action</th><th>Date</th><th>Time</th><th>Miles</th><th>Hours</th><th>Location</th><th>VIN</th><th>Truck #</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderTimeline(events){
+  // Group active duty-status events by date
+  const active = events.filter(e=>e.recordStatus===1 && e.eventType===1).sort((a,b)=>{
+    if(a.date!==b.date) return a.date<b.date?-1:1;
+    return a.time<b.time?-1:1;
+  });
+  if(!active.length) return '<div class="empty">No timeline data</div>';
+
+  const days = {};
+  active.forEach(e=>{
+    if(!days[e.date]) days[e.date]=[];
+    days[e.date].push(e);
+  });
+
+  let html = '';
+  const sortedDays = Object.keys(days).sort();
+  for(const day of sortedDays){
+    const evts = days[day];
+    let segments = '';
+    for(let i=0;i<evts.length;i++){
+      const e = evts[i];
+      const startMin = timeToMinutes(e.time);
+      const endMin = (i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
+      const leftPct = (startMin/1440*100).toFixed(2);
+      const widthPct = ((endMin-startMin)/1440*100).toFixed(2);
+      const color = DUTY_COLORS[e.eventCode]||'var(--text2)';
+      const label = DUTY_CODES[e.eventCode]||'';
+      segments += `<div class="timeline-segment" style="left:${leftPct}%;width:${widthPct}%;background:${color}">
+        <div class="tooltip">${fmtTime(e.time)} - ${label}</div>
+      </div>`;
+    }
+    html += `<div class="timeline-day">
+      <div class="timeline-label">${fmtDate(day)}</div>
+      <div class="timeline-bar">${segments}</div>
+    </div>`;
+  }
+  return html;
+}
+
+function renderUsers(users){
+  if(!users.length) return '<div class="empty">No users found</div>';
+  let rows = users.map(u=>`<tr><td>${u.userId}</td><td>${u.role}</td><td>${u.lastName}, ${u.firstName}</td><td>${u.eldId||'-'}</td></tr>`).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>User ID</th><th>Role</th><th>Name</th><th>ELD ID</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+// ========== TAB SYSTEM ==========
+function buildTabs(data){
+  const tabDefs = [
+    {id:'cert', label:'Certifications', color:'var(--cert)', count:data.certifications.length},
+    {id:'timeline', label:'Timeline', color:'var(--accent)', count:''},
+    {id:'events', label:'Events', color:'var(--text)', count:data.events.length},
+    {id:'annotations', label:'Annotations', color:'var(--accent2)', count:Object.keys(data.annotations).length},
+    {id:'malfunctions', label:'Malf/Diag', color:'var(--malf)', count:data.malfunctions.length},
+    {id:'logins', label:'Login/Logout', color:'var(--login)', count:data.logins.length},
+    {id:'engines', label:'Engine Activity', color:'var(--engine)', count:data.engines.length},
+    {id:'users', label:'Users & CMVs', color:'var(--text2)', count:data.users.length},
+  ];
+
+  const tabsEl = document.getElementById('tabs');
+  const panelsEl = document.getElementById('tab-panels');
+
+  tabsEl.innerHTML = tabDefs.map((t,i)=>`
+    <div class="tab ${i===0?'active':''}" data-tab="${t.id}" onclick="switchTab('${t.id}')">
+      <span class="dot" style="background:${t.color}"></span>
+      ${t.label}
+      ${t.count!==''?`<span class="badge">${t.count}</span>`:''}
+    </div>
+  `).join('');
+
+  panelsEl.innerHTML = `
+    <div class="tab-panel active" id="panel-cert">${renderCertifications(data.certifications)}</div>
+    <div class="tab-panel" id="panel-timeline"><div class="timeline-section">${renderTimeline(data.events)}</div></div>
+    <div class="tab-panel" id="panel-events">${renderEvents(data.events, data.annotations)}</div>
+    <div class="tab-panel" id="panel-annotations">${renderAnnotations(data.annotations)}</div>
+    <div class="tab-panel" id="panel-malfunctions">${renderMalfunctions(data.malfunctions)}</div>
+    <div class="tab-panel" id="panel-logins">${renderLogins(data.logins)}</div>
+    <div class="tab-panel" id="panel-engines">${renderEngines(data.engines)}</div>
+    <div class="tab-panel" id="panel-users">${renderUsers(data.users)}</div>
+  `;
+}
+
+function switchTab(id){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+id));
+}
+
+// ========== FILE HANDLING ==========
+function handleFile(file){
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    const text = ev.target.result;
+    const data = parseEROD(text);
+
+    document.getElementById('drop-zone').style.display='none';
+    document.getElementById('content').style.display='block';
+    document.getElementById('file-name-display').textContent = file.name;
+
+    renderHeader(data.header);
+    renderSummary(data);
+    buildTabs(data);
+  };
+  reader.readAsText(file);
+}
+
+// Drag & drop
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+dz.addEventListener('drop',e=>{
+  e.preventDefault();dz.classList.remove('dragover');
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+document.getElementById('file-input').addEventListener('change',e=>{
+  if(e.target.files.length) handleFile(e.target.files[0]);
+});
+</script>
+</body>
+</html>
