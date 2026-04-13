@@ -272,9 +272,86 @@ tbody tr:nth-child(even):hover{background:rgba(79,125,249,.04)}
 }
 .timeline-header{
   display:flex;align-items:center;justify-content:space-between;
-  margin-bottom:20px;
+  margin-bottom:20px;flex-wrap:wrap;gap:12px;
 }
+.timeline-header-left{display:flex;align-items:center;gap:14px}
 .timeline-title{font-size:15px;font-weight:600;color:var(--text)}
+/* View toggle */
+.view-toggle{
+  display:flex;background:var(--surface2);border-radius:6px;
+  border:1px solid var(--border);overflow:hidden;
+}
+.view-toggle button{
+  font-family:'DM Sans',sans-serif;font-size:12px;font-weight:500;
+  padding:5px 14px;border:none;cursor:pointer;color:var(--text3);
+  background:transparent;transition:all .15s;letter-spacing:.02em;
+}
+.view-toggle button:hover{color:var(--text2)}
+.view-toggle button.active{background:var(--accent);color:#fff}
+/* Daily view */
+.daily-nav{
+  display:flex;align-items:center;gap:8px;margin-bottom:16px;
+}
+.daily-nav button{
+  font-family:'DM Sans',sans-serif;font-size:12px;font-weight:500;
+  padding:5px 12px;border:1px solid var(--border);border-radius:6px;
+  cursor:pointer;color:var(--text2);background:var(--surface2);transition:all .15s;
+}
+.daily-nav button:hover{border-color:var(--border2);color:var(--text)}
+.daily-nav button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.daily-nav button:disabled{opacity:.3;cursor:default}
+.daily-detail{margin-top:16px}
+.daily-bar-wrap{position:relative;margin-bottom:16px}
+.daily-bar{
+  height:48px;background:var(--surface2);border-radius:6px;
+  position:relative;overflow:hidden;border:1px solid var(--border);
+}
+.daily-bar .timeline-segment{height:100%}
+.daily-axis{
+  display:flex;justify-content:space-between;margin-top:4px;
+  padding:0 1px;
+}
+.daily-axis span{
+  font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);
+  letter-spacing:.04em;
+}
+.daily-events-list{margin-top:12px}
+.daily-event-row{
+  display:flex;align-items:center;gap:12px;
+  padding:8px 12px;border-radius:6px;
+  transition:background .1s;
+}
+.daily-event-row:hover{background:var(--surface2)}
+.daily-event-time{
+  font-family:'JetBrains Mono',monospace;font-size:12px;
+  color:var(--text2);width:52px;flex-shrink:0;font-weight:500;
+}
+.daily-event-dur{
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--text3);width:56px;flex-shrink:0;
+}
+.daily-event-status{flex-shrink:0;width:160px}
+.daily-event-loc{
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--text3);flex-shrink:0;
+}
+.daily-event-ann{
+  font-size:12px;color:var(--accent2);font-style:italic;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;
+}
+.daily-summary{
+  display:flex;gap:16px;margin-top:16px;padding-top:16px;
+  border-top:1px solid var(--border);flex-wrap:wrap;
+}
+.daily-summary-item{
+  display:flex;align-items:center;gap:8px;
+}
+.daily-summary-swatch{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.daily-summary-label{font-size:12px;color:var(--text2)}
+.daily-summary-value{
+  font-family:'JetBrains Mono',monospace;font-size:12px;
+  font-weight:600;color:var(--text);
+}
 .timeline-legend{display:flex;gap:16px;flex-wrap:wrap}
 .legend-item{
   display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);
@@ -685,33 +762,50 @@ function renderUsers(users){
     <tbody>${users.map(u=>`<tr><td class="coord">${u.userId}</td><td>${u.role}</td><td>${u.lastName}, ${u.firstName}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
-function renderTimeline(events){
+// Store timeline data globally for view switching
+let _tlData=null;
+let _tlAnnotations=null;
+
+function renderTimeline(events,annotations){
   const active=events.filter(e=>e.recordStatus===1&&e.eventType===1).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.time<b.time?-1:1);
   if(!active.length)return'<div class="empty">No timeline data</div>';
   const days={};
   active.forEach(e=>{if(!days[e.date])days[e.date]=[];days[e.date].push(e);});
   const sortedDays=Object.keys(days).sort();
+  _tlData={days,sortedDays,annotations:annotations||{}};
 
-  // Legend
   const legendItems=[
     {label:'Off Duty',color:'var(--off-duty)',desc:'Not working, personal time'},
     {label:'Sleeper Berth',color:'var(--sleeper)',desc:'Rest period in sleeper'},
     {label:'Driving',color:'var(--driving)',desc:'Operating the CMV'},
     {label:'On Duty',color:'var(--on-duty)',desc:'Working but not driving'},
   ];
-  let legendHtml=legendItems.map(l=>
+  const legendHtml=legendItems.map(l=>
     `<div class="legend-item" title="${l.desc}"><div class="legend-swatch" style="background:${l.color}"></div>${l.label}</div>`
   ).join('');
 
-  // Hour axis
+  return`<div class="timeline-container">
+    <div class="timeline-header">
+      <div class="timeline-header-left">
+        <div class="timeline-title">Duty Status Timeline</div>
+        <div class="view-toggle">
+          <button class="active" onclick="showTotalView(this)">Total</button>
+          <button onclick="showDailyView(this)">Daily</button>
+        </div>
+      </div>
+      <div class="timeline-legend">${legendHtml}</div>
+    </div>
+    <div id="tl-total">${renderTotalView(days,sortedDays)}</div>
+    <div id="tl-daily" style="display:none"></div>
+  </div>`;
+}
+
+function renderTotalView(days,sortedDays){
   const hours=[0,3,6,9,12,15,18,21,24];
   let axisHtml=hours.map(h=>{
     const pct=(h/24*100).toFixed(2);
-    const label=String(h).padStart(2,'0')+':00';
-    return`<span class="timeline-axis-tick" style="left:${pct}%">${label}</span><span class="timeline-axis-line" style="left:${pct}%"></span>`;
+    return`<span class="timeline-axis-tick" style="left:${pct}%">${String(h).padStart(2,'0')}:00</span><span class="timeline-axis-line" style="left:${pct}%"></span>`;
   }).join('');
-
-  // Day rows
   let rowsHtml='';
   for(const day of sortedDays){
     const evts=days[day];
@@ -727,32 +821,129 @@ function renderTimeline(events){
       const color=DUTY_COLORS[e.eventCode]||'var(--text3)';
       const hex=DUTY_HEX[e.eventCode]||'#5c6478';
       const label=DUTY_CODES[e.eventCode]||'Unknown';
-      const short=DUTY_SHORT[e.eventCode]||'?';
       segs+=`<div class="timeline-segment" style="left:${leftPct}%;width:${widthPct}%;background:${color}">
         <div class="timeline-tooltip">
           <div class="tt-status"><span class="tt-dot" style="background:${hex}"></span>${label}</div>
-          <div class="tt-detail">
-            ${fmtTimeShort(e.time)} - ${i+1<evts.length?fmtTimeShort(evts[i+1].time):'24:00'}<br>
-            Duration: ${durationStr(dur)}<br>
-            ${fmtCoord(e.lat)!=='-'?'Location: '+fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}
-          </div>
+          <div class="tt-detail">${fmtTimeShort(e.time)} - ${i+1<evts.length?fmtTimeShort(evts[i+1].time):'24:00'}<br>Duration: ${durationStr(dur)}<br>${fmtCoord(e.lat)!=='-'?'Location: '+fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
         </div>
       </div>`;
     }
-    rowsHtml+=`<div class="timeline-day">
-      <div class="timeline-label">${fmtDateShort(day)}</div>
-      <div class="timeline-bar">${gridlines}${segs}</div>
+    rowsHtml+=`<div class="timeline-day"><div class="timeline-label">${fmtDateShort(day)}</div><div class="timeline-bar">${gridlines}${segs}</div></div>`;
+  }
+  return`<div class="timeline-axis" style="margin-left:100px;position:relative;height:20px">${axisHtml}</div>${rowsHtml}`;
+}
+
+function showTotalView(btn){
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tl-total').style.display='';
+  document.getElementById('tl-daily').style.display='none';
+}
+
+function showDailyView(btn){
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tl-total').style.display='none';
+  const dailyEl=document.getElementById('tl-daily');
+  dailyEl.style.display='';
+  if(!dailyEl.dataset.init){
+    dailyEl.dataset.init='1';
+    renderDailyNav(0);
+  }
+}
+
+function renderDailyNav(idx){
+  if(!_tlData)return;
+  const{days,sortedDays,annotations}=_tlData;
+  const dailyEl=document.getElementById('tl-daily');
+  const day=sortedDays[idx];
+  const evts=days[day];
+
+  // Nav buttons
+  let navHtml=sortedDays.map((d,i)=>
+    `<button class="${i===idx?'active':''}" onclick="renderDailyNav(${i})">${fmtDateShort(d)}</button>`
+  ).join('');
+  const prevBtn=idx>0?`<button onclick="renderDailyNav(${idx-1})">&#9664;</button>`:`<button disabled>&#9664;</button>`;
+  const nextBtn=idx<sortedDays.length-1?`<button onclick="renderDailyNav(${idx+1})">&#9654;</button>`:`<button disabled>&#9654;</button>`;
+
+  // Big bar with gridlines
+  const gridlines=[3,6,9,12,15,18,21].map(h=>
+    `<div class="timeline-gridline" style="left:${(h/24*100).toFixed(2)}%"></div>`
+  ).join('');
+  let segs='';
+  for(let i=0;i<evts.length;i++){
+    const e=evts[i];
+    const startMin=timeToMinutes(e.time);
+    const endMin=(i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
+    const dur=endMin-startMin;
+    const leftPct=(startMin/1440*100).toFixed(2);
+    const widthPct=(dur/1440*100).toFixed(2);
+    const color=DUTY_COLORS[e.eventCode]||'var(--text3)';
+    const hex=DUTY_HEX[e.eventCode]||'#5c6478';
+    const label=DUTY_CODES[e.eventCode]||'Unknown';
+    segs+=`<div class="timeline-segment" style="left:${leftPct}%;width:${widthPct}%;background:${color}">
+      <div class="timeline-tooltip">
+        <div class="tt-status"><span class="tt-dot" style="background:${hex}"></span>${label}</div>
+        <div class="tt-detail">${fmtTimeShort(e.time)} - ${i+1<evts.length?fmtTimeShort(evts[i+1].time):'24:00'}<br>Duration: ${durationStr(dur)}<br>${fmtCoord(e.lat)!=='-'?'Location: '+fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
+      </div>
     </div>`;
   }
 
-  return`<div class="timeline-container">
-    <div class="timeline-header">
-      <div class="timeline-title">Duty Status Timeline</div>
-      <div class="timeline-legend">${legendHtml}</div>
-    </div>
-    <div class="timeline-axis" style="margin-left:100px;position:relative;height:20px">${axisHtml}</div>
-    ${rowsHtml}
-  </div>`;
+  // Axis labels
+  const axisLabels=[0,3,6,9,12,15,18,21,24].map(h=>
+    `<span>${String(h).padStart(2,'0')}:00</span>`
+  ).join('');
+
+  // Event detail rows
+  let eventRows='';
+  for(let i=0;i<evts.length;i++){
+    const e=evts[i];
+    const startMin=timeToMinutes(e.time);
+    const endMin=(i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
+    const dur=endMin-startMin;
+    const label=DUTY_CODES[e.eventCode]||'Unknown';
+    const css='status-'+(DUTY_CSS[e.eventCode]||'');
+    const ann=annotations[e.seqId];
+    eventRows+=`<div class="daily-event-row">
+      <div class="daily-event-time">${fmtTimeShort(e.time)}</div>
+      <div class="daily-event-dur">${durationStr(dur)}</div>
+      <div class="daily-event-status"><span class="status-badge ${css}">${label}</span></div>
+      <div class="daily-event-loc">${fmtCoord(e.lat)!=='-'?fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
+      <div class="daily-event-ann">${ann?ann.comment:''}</div>
+    </div>`;
+  }
+
+  // Per-status totals for the day
+  const totals={1:0,2:0,3:0,4:0};
+  for(let i=0;i<evts.length;i++){
+    const startMin=timeToMinutes(evts[i].time);
+    const endMin=(i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
+    totals[evts[i].eventCode]=(totals[evts[i].eventCode]||0)+(endMin-startMin);
+  }
+  const summaryItems=[
+    {label:'Off Duty',code:1,color:'var(--off-duty)'},
+    {label:'Sleeper',code:2,color:'var(--sleeper)'},
+    {label:'Driving',code:3,color:'var(--driving)'},
+    {label:'On Duty',code:4,color:'var(--on-duty)'},
+  ];
+  const summaryHtml=summaryItems.map(s=>
+    `<div class="daily-summary-item">
+      <div class="daily-summary-swatch" style="background:${s.color}"></div>
+      <div class="daily-summary-label">${s.label}</div>
+      <div class="daily-summary-value">${durationStr(totals[s.code]||0)}</div>
+    </div>`
+  ).join('');
+
+  dailyEl.innerHTML=`
+    <div class="daily-nav">${prevBtn}${navHtml}${nextBtn}</div>
+    <div class="daily-detail">
+      <div class="daily-bar-wrap">
+        <div class="daily-bar">${gridlines}${segs}</div>
+        <div class="daily-axis">${axisLabels}</div>
+      </div>
+      <div class="daily-events-list">${eventRows}</div>
+      <div class="daily-summary">${summaryHtml}</div>
+    </div>`;
 }
 
 // ========== TAB SYSTEM ==========
@@ -773,7 +964,7 @@ function buildTabs(data){
     </div>`
   ).join('');
   document.getElementById('tab-panels').innerHTML=`
-    <div class="tab-panel active" id="panel-timeline">${renderTimeline(data.events)}</div>
+    <div class="tab-panel active" id="panel-timeline">${renderTimeline(data.events,data.annotations)}</div>
     <div class="tab-panel" id="panel-cert">${renderCertifications(data.certifications)}</div>
     <div class="tab-panel" id="panel-events">${renderEvents(data.events,data.annotations)}</div>
     <div class="tab-panel" id="panel-annotations">${renderAnnotations(data.annotations)}</div>
