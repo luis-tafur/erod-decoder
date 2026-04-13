@@ -476,6 +476,26 @@ const MALF_CODES_MALF = {1:'Power Compliance',2:'Engine Sync Compliance',3:'Timi
 const ENGINE_TYPES = {1:'Shut Down',3:'Power Up'};
 const LOGIN_TYPES = {1:'Login',2:'Logout'};
 
+// ========== TIMEZONE ==========
+let TZ_OFFSET_HOURS = -4; // Default ET (UTC-0400), updated from header
+const TZ_NAMES = {4:'ET',5:'CT',6:'MT',7:'PT',8:'AKT',10:'HT'};
+
+// Convert UTC date+time (MMDDYY + HHMMSS) to local, returns {date,time}
+function utcToLocal(d,t){
+  if(!d||d.length!==6||!t||t.length!==6) return {date:d,time:t};
+  const mm=parseInt(d.slice(0,2)),dd=parseInt(d.slice(2,4)),yy=parseInt(d.slice(4,6));
+  const hh=parseInt(t.slice(0,2)),mi=parseInt(t.slice(2,4)),ss=parseInt(t.slice(4,6));
+  const utc=new Date(Date.UTC(2000+yy,mm-1,dd,hh,mi,ss));
+  utc.setUTCHours(utc.getUTCHours()+TZ_OFFSET_HOURS);
+  const lm=String(utc.getUTCMonth()+1).padStart(2,'0');
+  const ld=String(utc.getUTCDate()).padStart(2,'0');
+  const ly=String(utc.getUTCFullYear()-2000).padStart(2,'0');
+  const lh=String(utc.getUTCHours()).padStart(2,'0');
+  const lmi=String(utc.getUTCMinutes()).padStart(2,'0');
+  const ls=String(utc.getUTCSeconds()).padStart(2,'0');
+  return {date:lm+ld+ly, time:lh+lmi+ls};
+}
+
 // ========== HELPERS ==========
 function fmtDate(d){
   if(!d||d.length!==6) return d||'';
@@ -493,6 +513,14 @@ function fmtTimeShort(t){
   if(!t||t.length!==6) return t||'';
   return t.slice(0,2)+':'+t.slice(2,4);
 }
+// Format with local TZ conversion
+function fmtLocalDate(d,t){const l=utcToLocal(d,t);return fmtDate(l.date);}
+function fmtLocalDateShort(d,t){const l=utcToLocal(d,t);return fmtDateShort(l.date);}
+function fmtLocalTime(d,t){const l=utcToLocal(d,t);return fmtTime(l.time);}
+function fmtLocalTimeShort(d,t){const l=utcToLocal(d,t);return fmtTimeShort(l.time);}
+function localTimeToMinutes(d,t){const l=utcToLocal(d,t);return timeToMinutes(l.time);}
+function localDateStr(d,t){const l=utcToLocal(d,t);return l.date;} // raw MMDDYY in local
+
 function fmtCoord(v){
   if(!v||v==='X') return '-';
   return parseFloat(v).toFixed(2);
@@ -509,6 +537,11 @@ function minutesToTime(m){
 function durationStr(mins){
   const h=Math.floor(mins/60);const m=mins%60;
   return h>0?(h+'h '+(m>0?m+'m':'')):(m+'m');
+}
+function tzLabel(){
+  const abs=Math.abs(TZ_OFFSET_HOURS);
+  const name=TZ_NAMES[abs]||'';
+  return name?name+' (UTC'+(TZ_OFFSET_HOURS>0?'+':'')+TZ_OFFSET_HOURS+'h)':'UTC'+(TZ_OFFSET_HOURS>0?'+':'')+TZ_OFFSET_HOURS+'h';
 }
 
 // ========== PARSER ==========
@@ -553,6 +586,9 @@ function parseEROD(rawText){
       codriverFlag:(h[20]&&h[20]!=='X')?'1':'0',
       eldProvider:h[24]||'',eldFirmware:h[25]||'',certificate:h[26]||''
     };
+    // Set global TZ offset from header (value is hours offset, e.g. "04" = UTC-4)
+    const tzVal=parseInt(data.header.timeZoneOffset)||4;
+    TZ_OFFSET_HOURS=-tzVal; // FMCSA stores as positive number for west of UTC
   }
   // Users
   const uRaw=segments['User List:'];
@@ -650,7 +686,7 @@ function renderHeader(h){
       <div class="header-field"><label>DL State</label><span>${h.dlState}</span></div>
       <div class="header-field"><label>DL Number</label><span>${h.dlNumber}</span></div>
       <div class="header-field"><label>Multi-Day</label><span>${h.multiDay}-day</span></div>
-      <div class="header-field"><label>TZ Offset</label><span>UTC-${h.timeZoneOffset}</span></div>
+      <div class="header-field"><label>Timezone</label><span>${tzLabel()}</span></div>
       <div class="header-field"><label>ELD ID</label><span>${h.eldId}</span></div>
       <div class="header-field"><label>Shipping Doc</label><span>${h.shippingId||'N/A'}</span></div>
       <div class="header-field"><label>Co-Driver</label><span>${h.codriverFlag==='0'?'None':h.codriverFirst+' '+h.codriverLast}</span></div>
@@ -684,7 +720,7 @@ function renderCertifications(certs){
     <thead><tr><th>Seq</th><th>Action</th><th>Action Date</th><th>Action Time</th><th>Day Certified</th><th>Code</th></tr></thead>
     <tbody>${certs.map(c=>{
       const css=c.actionType===1?'status-certify':'status-recertify';
-      return`<tr><td class="coord">${c.seqId}</td><td><span class="status-badge ${css}">${CERT_ACTIONS[c.actionType]||c.actionType}</span></td><td>${fmtDate(c.date)}</td><td>${fmtTime(c.time)}</td><td><span class="cert-day">${fmtDate(c.certifiedDate)}</span></td><td class="coord">${c.actionCode}</td></tr>`;
+      return`<tr><td class="coord">${c.seqId}</td><td><span class="status-badge ${css}">${CERT_ACTIONS[c.actionType]||c.actionType}</span></td><td>${fmtLocalDate(c.date,c.time)}</td><td>${fmtLocalTime(c.date,c.time)}</td><td><span class="cert-day">${fmtDate(c.certifiedDate)}</span></td><td class="coord">${c.actionCode}</td></tr>`;
     }).join('')}</tbody></table></div>`;
 }
 
@@ -706,7 +742,7 @@ function renderEvents(events,annotations){
         <td>${cc?`<span class="status-badge ${cc}">${cl}</span>`:cl}</td>
         <td><span class="status-badge ${sc}">${sl}</span></td>
         <td><span class="${oc}">${ol}</span></td>
-        <td>${fmtDate(e.date)}</td><td>${fmtTime(e.time)}</td>
+        <td>${fmtLocalDate(e.date,e.time)}</td><td>${fmtLocalTime(e.date,e.time)}</td>
         <td class="coord">${e.accumMiles}</td><td class="coord">${e.accumHours}</td>
         <td class="coord">${fmtCoord(e.lat)}, ${fmtCoord(e.lon)}</td>
         <td>${ann?`<span class="annotation-text">${ann.comment}</span>`:''}</td></tr>`;
@@ -718,7 +754,7 @@ function renderAnnotations(annotations){
   if(!keys.length)return'<div class="empty">No annotations</div>';
   return`<div class="table-wrap"><table>
     <thead><tr><th>Event Seq</th><th>User</th><th>Comment</th><th>Date</th><th>Time</th></tr></thead>
-    <tbody>${keys.map(k=>{const a=annotations[k];return`<tr><td class="coord">${k}</td><td class="coord">${a.userId}</td><td>${a.comment}</td><td>${fmtDate(a.date)}</td><td>${fmtTime(a.time)}</td></tr>`;}).join('')}</tbody></table></div>`;
+    <tbody>${keys.map(k=>{const a=annotations[k];return`<tr><td class="coord">${k}</td><td class="coord">${a.userId}</td><td>${a.comment}</td><td>${fmtLocalDate(a.date,a.time)}</td><td>${fmtLocalTime(a.date,a.time)}</td></tr>`;}).join('')}</tbody></table></div>`;
 }
 
 function renderMalfunctions(malfs){
@@ -731,7 +767,7 @@ function renderMalfunctions(malfs){
       let cl=m.eventCode;
       if(m.eventType===3)cl=MALF_CODES_DIAG[m.eventCode]||m.eventCode;
       if(m.eventType===4)cl=MALF_CODES_MALF[m.eventCode]||m.eventCode;
-      return`<tr><td class="coord">${m.seqId}</td><td><span class="${tc}">${tl}</span></td><td>${cl}</td><td>${fmtDate(m.date)}</td><td>${fmtTime(m.time)}</td><td class="coord">${m.accumMiles}</td><td class="coord">${m.accumHours}</td><td>${RECORD_ORIGIN[m.recordOrigin]||m.recordOrigin}</td></tr>`;
+      return`<tr><td class="coord">${m.seqId}</td><td><span class="${tc}">${tl}</span></td><td>${cl}</td><td>${fmtLocalDate(m.date,m.time)}</td><td>${fmtLocalTime(m.date,m.time)}</td><td class="coord">${m.accumMiles}</td><td class="coord">${m.accumHours}</td><td>${RECORD_ORIGIN[m.recordOrigin]||m.recordOrigin}</td></tr>`;
     }).join('')}</tbody></table></div>`;
 }
 
@@ -741,7 +777,7 @@ function renderLogins(logins){
     <thead><tr><th>Seq</th><th>Action</th><th>User</th><th>Date</th><th>Time</th><th>Miles</th><th>Hours</th></tr></thead>
     <tbody>${logins.map(l=>{
       const css=l.eventCode===1?'status-active':'status-inactive';
-      return`<tr><td class="coord">${l.seqId}</td><td><span class="status-badge ${css}">${LOGIN_TYPES[l.eventCode]||l.eventCode}</span></td><td class="coord">${l.userId}</td><td>${fmtDate(l.date)}</td><td>${fmtTime(l.time)}</td><td class="coord">${l.accumMiles}</td><td class="coord">${l.accumHours}</td></tr>`;
+      return`<tr><td class="coord">${l.seqId}</td><td><span class="status-badge ${css}">${LOGIN_TYPES[l.eventCode]||l.eventCode}</span></td><td class="coord">${l.userId}</td><td>${fmtLocalDate(l.date,l.time)}</td><td>${fmtLocalTime(l.date,l.time)}</td><td class="coord">${l.accumMiles}</td><td class="coord">${l.accumHours}</td></tr>`;
     }).join('')}</tbody></table></div>`;
 }
 
@@ -751,7 +787,7 @@ function renderEngines(engines){
     <thead><tr><th>Seq</th><th>Action</th><th>Date</th><th>Time</th><th>Miles</th><th>Hours</th><th>Location</th><th>VIN</th><th>Truck</th></tr></thead>
     <tbody>${engines.map(e=>{
       const css=e.eventCode===3?'status-active':'status-inactive';
-      return`<tr><td class="coord">${e.seqId}</td><td><span class="status-badge ${css}">${ENGINE_TYPES[e.eventCode]||('Code '+e.eventCode)}</span></td><td>${fmtDate(e.date)}</td><td>${fmtTime(e.time)}</td><td class="coord">${e.accumMiles}</td><td class="coord">${e.accumHours}</td><td class="coord">${fmtCoord(e.lat)}, ${fmtCoord(e.lon)}</td><td class="coord">${e.vin}</td><td class="coord">${e.truckNumber}</td></tr>`;
+      return`<tr><td class="coord">${e.seqId}</td><td><span class="status-badge ${css}">${ENGINE_TYPES[e.eventCode]||('Code '+e.eventCode)}</span></td><td>${fmtLocalDate(e.date,e.time)}</td><td>${fmtLocalTime(e.date,e.time)}</td><td class="coord">${e.accumMiles}</td><td class="coord">${e.accumHours}</td><td class="coord">${fmtCoord(e.lat)}, ${fmtCoord(e.lon)}</td><td class="coord">${e.vin}</td><td class="coord">${e.truckNumber}</td></tr>`;
     }).join('')}</tbody></table></div>`;
 }
 
@@ -769,8 +805,13 @@ let _tlAnnotations=null;
 function renderTimeline(events,annotations){
   const active=events.filter(e=>e.recordStatus===1&&e.eventType===1).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.time<b.time?-1:1);
   if(!active.length)return'<div class="empty">No timeline data</div>';
+  // Group by LOCAL date (convert UTC event date/time to local)
   const days={};
-  active.forEach(e=>{if(!days[e.date])days[e.date]=[];days[e.date].push(e);});
+  active.forEach(e=>{
+    const localD=localDateStr(e.date,e.time);
+    if(!days[localD])days[localD]=[];
+    days[localD].push(e);
+  });
   const sortedDays=Object.keys(days).sort();
   _tlData={days,sortedDays,annotations:annotations||{}};
 
@@ -813,18 +854,20 @@ function renderTotalView(days,sortedDays){
     let segs='';
     for(let i=0;i<evts.length;i++){
       const e=evts[i];
-      const startMin=timeToMinutes(e.time);
-      const endMin=(i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
-      const dur=endMin-startMin;
+      const startMin=localTimeToMinutes(e.date,e.time);
+      const endMin=(i+1<evts.length)?localTimeToMinutes(evts[i+1].date,evts[i+1].time):1440;
+      const dur=Math.max(0,endMin-startMin);
       const leftPct=(startMin/1440*100).toFixed(2);
       const widthPct=(dur/1440*100).toFixed(2);
       const color=DUTY_COLORS[e.eventCode]||'var(--text3)';
       const hex=DUTY_HEX[e.eventCode]||'#5c6478';
       const label=DUTY_CODES[e.eventCode]||'Unknown';
+      const localT=fmtLocalTimeShort(e.date,e.time);
+      const nextT=(i+1<evts.length)?fmtLocalTimeShort(evts[i+1].date,evts[i+1].time):'24:00';
       segs+=`<div class="timeline-segment" style="left:${leftPct}%;width:${widthPct}%;background:${color}">
         <div class="timeline-tooltip">
           <div class="tt-status"><span class="tt-dot" style="background:${hex}"></span>${label}</div>
-          <div class="tt-detail">${fmtTimeShort(e.time)} - ${i+1<evts.length?fmtTimeShort(evts[i+1].time):'24:00'}<br>Duration: ${durationStr(dur)}<br>${fmtCoord(e.lat)!=='-'?'Location: '+fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
+          <div class="tt-detail">${localT} - ${nextT}<br>Duration: ${durationStr(dur)}<br>${fmtCoord(e.lat)!=='-'?'Location: '+fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
         </div>
       </div>`;
     }
@@ -873,18 +916,20 @@ function renderDailyNav(idx){
   let segs='';
   for(let i=0;i<evts.length;i++){
     const e=evts[i];
-    const startMin=timeToMinutes(e.time);
-    const endMin=(i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
-    const dur=endMin-startMin;
+    const startMin=localTimeToMinutes(e.date,e.time);
+    const endMin=(i+1<evts.length)?localTimeToMinutes(evts[i+1].date,evts[i+1].time):1440;
+    const dur=Math.max(0,endMin-startMin);
     const leftPct=(startMin/1440*100).toFixed(2);
     const widthPct=(dur/1440*100).toFixed(2);
     const color=DUTY_COLORS[e.eventCode]||'var(--text3)';
     const hex=DUTY_HEX[e.eventCode]||'#5c6478';
     const label=DUTY_CODES[e.eventCode]||'Unknown';
+    const localT=fmtLocalTimeShort(e.date,e.time);
+    const nextT=(i+1<evts.length)?fmtLocalTimeShort(evts[i+1].date,evts[i+1].time):'24:00';
     segs+=`<div class="timeline-segment" style="left:${leftPct}%;width:${widthPct}%;background:${color}">
       <div class="timeline-tooltip">
         <div class="tt-status"><span class="tt-dot" style="background:${hex}"></span>${label}</div>
-        <div class="tt-detail">${fmtTimeShort(e.time)} - ${i+1<evts.length?fmtTimeShort(evts[i+1].time):'24:00'}<br>Duration: ${durationStr(dur)}<br>${fmtCoord(e.lat)!=='-'?'Location: '+fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
+        <div class="tt-detail">${localT} - ${nextT}<br>Duration: ${durationStr(dur)}<br>${fmtCoord(e.lat)!=='-'?'Location: '+fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
       </div>
     </div>`;
   }
@@ -898,14 +943,14 @@ function renderDailyNav(idx){
   let eventRows='';
   for(let i=0;i<evts.length;i++){
     const e=evts[i];
-    const startMin=timeToMinutes(e.time);
-    const endMin=(i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
-    const dur=endMin-startMin;
+    const startMin=localTimeToMinutes(e.date,e.time);
+    const endMin=(i+1<evts.length)?localTimeToMinutes(evts[i+1].date,evts[i+1].time):1440;
+    const dur=Math.max(0,endMin-startMin);
     const label=DUTY_CODES[e.eventCode]||'Unknown';
     const css='status-'+(DUTY_CSS[e.eventCode]||'');
     const ann=annotations[e.seqId];
     eventRows+=`<div class="daily-event-row">
-      <div class="daily-event-time">${fmtTimeShort(e.time)}</div>
+      <div class="daily-event-time">${fmtLocalTimeShort(e.date,e.time)}</div>
       <div class="daily-event-dur">${durationStr(dur)}</div>
       <div class="daily-event-status"><span class="status-badge ${css}">${label}</span></div>
       <div class="daily-event-loc">${fmtCoord(e.lat)!=='-'?fmtCoord(e.lat)+', '+fmtCoord(e.lon):''}</div>
@@ -916,9 +961,9 @@ function renderDailyNav(idx){
   // Per-status totals for the day
   const totals={1:0,2:0,3:0,4:0};
   for(let i=0;i<evts.length;i++){
-    const startMin=timeToMinutes(evts[i].time);
-    const endMin=(i+1<evts.length)?timeToMinutes(evts[i+1].time):1440;
-    totals[evts[i].eventCode]=(totals[evts[i].eventCode]||0)+(endMin-startMin);
+    const startMin=localTimeToMinutes(evts[i].date,evts[i].time);
+    const endMin=(i+1<evts.length)?localTimeToMinutes(evts[i+1].date,evts[i+1].time):1440;
+    totals[evts[i].eventCode]=(totals[evts[i].eventCode]||0)+Math.max(0,endMin-startMin);
   }
   const summaryItems=[
     {label:'Off Duty',code:1,color:'var(--off-duty)'},
